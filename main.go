@@ -52,11 +52,6 @@ func handleCall(cl ari.Client, v *ari.StasisStart) {
 		log.Info("Call ended", "channel", channel.ID())
 	}()
 
-	if err := channel.Answer(); err != nil {
-		log.Error("Falied to answer call", "error", err)
-		return
-	}
-
 	dialedNumber, err := channel.GetVariable("EXTEN")
 	if err != nil {
 		log.Error("Failed to get dialed number", "error", err)
@@ -82,8 +77,11 @@ func handleCall(cl ari.Client, v *ari.StasisStart) {
 		}
 
 		endpoints := []string{"pjsip/1103", "pjsip/1102"}
+		cancelChans := make(map[string]chan struct{})
+
 		for _, endpoint := range endpoints {
-			go call.OriginateCall(cl, bridge, endpoint, callerNumber)
+			cancelChans[endpoint] = make(chan struct{})
+			go call.OriginateCall(cl, bridge, endpoint, callerNumber, cancelChans[endpoint], cancelChans)
 		}
 	}
 }
