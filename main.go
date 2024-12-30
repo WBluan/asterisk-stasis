@@ -191,13 +191,15 @@ func monitorChannelState(ch *ari.ChannelHandle, targetState string, timer *time.
 
 func monitorChannelsHangup(ch1 *ari.ChannelHandle, channels []*ari.ChannelHandle) {
 	channels = append(channels, ch1)
+	monitorHangupEvent(channels)
+}
+
+func monitorHangupEvent(channels []*ari.ChannelHandle) {
 	for i, ch1 := range channels {
 		for j, ch2 := range channels {
-			// Skip the same channel
 			if i == j {
 				continue
 			}
-
 			hangupEvent := ch1.Subscribe(ari.Events.ChannelHangupRequest)
 			if hangupEvent == nil {
 				log.Error("Failed to subscribe to hangup events", "channel", ch1.ID())
@@ -221,5 +223,7 @@ func monitorChannelsHangup(ch1 *ari.ChannelHandle, channels []*ari.ChannelHandle
 				}
 			}(ch1, ch2, hangupEvent)
 		}
+
 	}
+
 }
