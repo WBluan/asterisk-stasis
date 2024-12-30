@@ -10,6 +10,7 @@ import (
 
 	"github.com/CyCoreSystems/ari/v6"
 	brd "github.com/wbluan/api-stasis-go/bridge"
+	"github.com/wbluan/api-stasis-go/call"
 	"github.com/wbluan/api-stasis-go/connection"
 )
 
@@ -65,27 +66,11 @@ func handleStasisStartEvent(cl ari.Client, ch1 *ari.ChannelHandle, e *ari.Stasis
 	case "100":
 		endpoints := []string{"PJSIP/1101", "PJSIP/1102"}
 		for _, endpoint := range endpoints {
-			newChannel, err := cl.Channel().Originate(nil, ari.OriginateRequest{
-				Endpoint: endpoint,
-				App:      "simple-call",
-				CallerID: e.Channel.Caller.Number,
-			})
-			if err != nil {
-				log.Error("Failed to originate call", "error", err)
-				return
-			}
+			newChannel := call.CreateChannel(cl, e, endpoint)
 			channels = append(channels, newChannel)
 		}
 	default:
-		newChannel, err := cl.Channel().Originate(nil, ari.OriginateRequest{
-			Endpoint: "PJSIP/" + dialedNumber,
-			App:      "simple-call",
-			CallerID: e.Channel.Caller.Number,
-		})
-		if err != nil {
-			log.Error("Failed to originate call", "error", err)
-			return
-		}
+		newChannel := call.CreateChannel(cl, e, dialedNumber)
 		channels = append(channels, newChannel)
 	}
 
