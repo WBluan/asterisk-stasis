@@ -10,7 +10,7 @@ type ARIConfig struct {
 
 func GetAriConfig() ARIConfig {
 	return ARIConfig{
-		Application:  "callChildrens",
+		Application:  "simple-call",
 		Username:     "asterisk",
 		Password:     "asterisk",
 		URL:          "http://localhost:8088/ari",
