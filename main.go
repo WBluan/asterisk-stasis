@@ -60,12 +60,13 @@ func listenEvents(ctx context.Context, cl ari.Client) {
 func handleStasisStartEvent(cl ari.Client, ch *ari.ChannelHandle, e *ari.StasisStart) {
 	log.Debug("Processing Stasis Start event")
 
-	channels := creteChannels(cl, e)
+	channels := createChannels(cl, e)
+	upState := "Up"
 
 	// Verify if a channel hangup event is received
-	go monitorChannelsHangup(ch, channels)
+	go monitorChannelsHangup(append(channels, ch))
 	// Wait for all channels to reach the target state
-	if !waitForChannelState(channels, "Up", 20*time.Second) {
+	if !waitForChannelState(channels, upState, 20*time.Second) {
 		log.Warn("No channel reached target state", "state", "Up")
 		hangupChannels(channels)
 		return
@@ -84,7 +85,7 @@ func handleStasisStartEvent(cl ari.Client, ch *ari.ChannelHandle, e *ari.StasisS
 	}
 }
 
-func creteChannels(cl ari.Client, e *ari.StasisStart) []*ari.ChannelHandle {
+func createChannels(cl ari.Client, e *ari.StasisStart) []*ari.ChannelHandle {
 	var channels []*ari.ChannelHandle
 	dialedNumber := e.Args[0]
 	switch dialedNumber {
@@ -189,41 +190,39 @@ func monitorChannelState(ch *ari.ChannelHandle, targetState string, timer *time.
 	}
 }
 
-func monitorChannelsHangup(ch1 *ari.ChannelHandle, channels []*ari.ChannelHandle) {
-	channels = append(channels, ch1)
-	monitorHangupEvent(channels)
-}
+func monitorChannelsHangup(channels []*ari.ChannelHandle) {
 
-func monitorHangupEvent(channels []*ari.ChannelHandle) {
 	for i, ch1 := range channels {
 		for j, ch2 := range channels {
 			if i == j {
 				continue
 			}
+
 			hangupEvent := ch1.Subscribe(ari.Events.ChannelHangupRequest)
 			if hangupEvent == nil {
-				log.Error("Failed to subscribe to hangup events", "channel", ch1.ID())
+				slog.Error("Failed to subscribe to hangup events")
 				continue
 			}
 
 			log.Info("Subscribed to hangup event", "channel", ch1.ID())
 
-			go func(ch1, ch2 *ari.ChannelHandle, hangupEvent ari.Subscription) {
-				defer hangupEvent.Cancel()
-				log.Info("Monitoring hangup event", "channel", ch1.ID(), "linkedChannel", ch2.ID())
-
-				for range hangupEvent.Events() {
-					slog.Debug("Channel hangup detected", "channel", ch1.ID())
-					err := ch2.Hangup()
-					if err != nil {
-						log.Error("Failed to hang up linked channel", "linkedChannel", ch2.ID(), "error", err)
-						return
-					}
-					log.Info("Linked channel hung up successfully", "linkedChannel", ch2.ID())
-				}
-			}(ch1, ch2, hangupEvent)
+			go monitorHangupEvent(ch1, ch2, hangupEvent)
 		}
+	}
+}
 
+func monitorHangupEvent(ch1, ch2 *ari.ChannelHandle, hangupEvent ari.Subscription) {
+	defer hangupEvent.Cancel()
+
+	log.Info("Monitoring hangup event", "channel", ch1.ID(), "linkedChannel", ch2.ID())
+
+	for range hangupEvent.Events() {
+		slog.Debug("Channel hangup detected", "channel", ch1.ID())
+		if err := ch2.Hangup(); err != nil {
+			log.Error("Failed to hang up linked channel", err)
+			return
+		}
+		log.Info("Linked channel hung up successfully", "linkedChannel", ch2.ID())
 	}
 
 }
