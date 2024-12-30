@@ -1,5 +1,12 @@
 package config
 
+import (
+	"log"
+	"os"
+
+	"github.com/joho/godotenv"
+)
+
 type ARIConfig struct {
 	Application  string
 	Username     string
@@ -9,11 +16,15 @@ type ARIConfig struct {
 }
 
 func GetAriConfig() ARIConfig {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 	return ARIConfig{
-		Application:  "simple-call",
-		Username:     "asterisk",
-		Password:     "asterisk",
-		URL:          "http://localhost:8088/ari",
-		WebsocketURL: "ws://localhost:8088/ari/events",
+		Application:  os.Getenv("ARI_APP"),
+		Username:     os.Getenv("ARI_USERNAME"),
+		Password:     os.Getenv("ARI_PASSWORD"),
+		URL:          os.Getenv("ARI_URL"),
+		WebsocketURL: os.Getenv("ARI_WS_URL"),
 	}
 }
