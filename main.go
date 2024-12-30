@@ -46,8 +46,8 @@ func listenEvents(ctx context.Context, cl ari.Client) {
 				continue
 			}
 
-			ch1 := cl.Channel().Get(stasisStart.Key(ari.ChannelKey, stasisStart.Channel.ID))
-			go handleStasisStartEvent(cl, ch1, stasisStart)
+			ch := cl.Channel().Get(stasisStart.Key(ari.ChannelKey, stasisStart.Channel.ID))
+			go handleStasisStartEvent(cl, ch, stasisStart)
 			slog.Debug("Event processed", "event", e)
 
 		case <-ctx.Done():
@@ -57,25 +57,13 @@ func listenEvents(ctx context.Context, cl ari.Client) {
 	}
 }
 
-func handleStasisStartEvent(cl ari.Client, ch1 *ari.ChannelHandle, e *ari.StasisStart) {
+func handleStasisStartEvent(cl ari.Client, ch *ari.ChannelHandle, e *ari.StasisStart) {
 	log.Debug("Processing Stasis Start event")
 
-	var channels []*ari.ChannelHandle
-	dialedNumber := e.Args[0]
-	switch dialedNumber {
-	case "100":
-		endpoints := []string{"1101", "1102"}
-		for _, endpoint := range endpoints {
-			newChannel := call.CreateChannel(cl, e, endpoint)
-			channels = append(channels, newChannel)
-		}
-	default:
-		newChannel := call.CreateChannel(cl, e, dialedNumber)
-		channels = append(channels, newChannel)
-	}
+	channels := creteChannels(cl, e)
 
 	// Verify if a channel hangup event is received
-	go monitorChannelsHangup(ch1, channels)
+	go monitorChannelsHangup(ch, channels)
 	// Wait for all channels to reach the target state
 	if !waitForChannelState(channels, "Up", 20*time.Second) {
 		log.Warn("No channel reached target state", "state", "Up")
@@ -84,29 +72,59 @@ func handleStasisStartEvent(cl ari.Client, ch1 *ari.ChannelHandle, e *ari.Stasis
 
 	log.Info("All channels are up")
 	// Answer the first channel
-	err := ch1.Answer()
-	if err != nil {
-		log.Error("Failed to answer channel", "channel", ch1.ID(), "error", err)
+	if err := answerChannel(ch); err != nil {
+		log.Error("Failed to answer channel", "error", err)
 		return
 	}
 
-	bridge, err := brd.CreateBridge(cl, ch1.Key())
-	if err != nil {
-		log.Error("Failed to create bridge", "error", err)
+	if err := setupBridge(cl, ch, channels); err != nil {
+		log.Error("Failed to setup bridge", "error", err)
 		return
 	}
-	slog.Debug("Bridge created", "bridge", bridge.ID())
+}
 
-	err = brd.AddChannelToBridge(bridge, ch1.ID())
+func creteChannels(cl ari.Client, e *ari.StasisStart) []*ari.ChannelHandle {
+	var channels []*ari.ChannelHandle
+	dialedNumber := e.Args[0]
+	switch dialedNumber {
+	case "100":
+		endpoints := []string{"1101", "1102"}
+		for _, endpoint := range endpoints {
+			channels = append(channels, call.CreateChannel(cl, e, endpoint))
+		}
+	default:
+		channels = append(channels, call.CreateChannel(cl, e, dialedNumber))
+	}
+	return channels
+}
+
+func answerChannel(ch *ari.ChannelHandle) error {
+	slog.Debug("Answering channel", "channel", ch.ID())
+	return ch.Answer()
+}
+
+func setupBridge(cl ari.Client, ch *ari.ChannelHandle, channels []*ari.ChannelHandle) error {
+	bridge, err := brd.CreateBridge(cl, ch.Key())
 	if err != nil {
+		slog.Error("Failed to create bridge", "error", err)
+		return err
+	}
+	log.Debug("Bridge created", "bridge", bridge.ID())
+
+	if err := brd.AddChannelToBridge(bridge, ch.ID()); err != nil {
 		log.Error("Failed to add channel to bridge", "error", err)
-		return
-	}
-	for _, ch := range channels {
-		brd.AddChannelToBridge(bridge, ch.ID())
+		return err
 	}
 
-	slog.Debug("Channels added to bridge", "bridge", bridge.ID())
+	for _, ch := range channels {
+		if err := brd.AddChannelToBridge(bridge, ch.ID()); err != nil {
+			log.Error("Failed to add channel to bridge", "error", err)
+			return err
+		}
+	}
+
+	log.Debug("Channels added to bridge", "bridge", bridge.ID())
+	return nil
 }
 
 func waitForChannelState(channels []*ari.ChannelHandle, targetState string, timeout time.Duration) bool {
@@ -162,9 +180,9 @@ func waitForChannelState(channels []*ari.ChannelHandle, targetState string, time
 
 func monitorChannelsHangup(ch1 *ari.ChannelHandle, channels []*ari.ChannelHandle) {
 	channels = append(channels, ch1)
-
 	for i, ch1 := range channels {
 		for j, ch2 := range channels {
+			// Skip the same channel
 			if i == j {
 				continue
 			}
