@@ -64,7 +64,7 @@ func handleStasisStartEvent(cl ari.Client, ch1 *ari.ChannelHandle, e *ari.Stasis
 	dialedNumber := e.Args[0]
 	switch dialedNumber {
 	case "100":
-		endpoints := []string{"PJSIP/1101", "PJSIP/1102"}
+		endpoints := []string{"1101", "1102"}
 		for _, endpoint := range endpoints {
 			newChannel := call.CreateChannel(cl, e, endpoint)
 			channels = append(channels, newChannel)
@@ -74,14 +74,16 @@ func handleStasisStartEvent(cl ari.Client, ch1 *ari.ChannelHandle, e *ari.Stasis
 		channels = append(channels, newChannel)
 	}
 
+	// Verify if a channel hangup event is received
 	go monitorChannelsHangup(ch1, channels)
-
+	// Wait for all channels to reach the target state
 	if !waitForChannelState(channels, "Up", 20*time.Second) {
 		log.Warn("No channel reached target state", "state", "Up")
-	} else {
-		log.Info("All channels are up")
+		return
 	}
 
+	log.Info("All channels are up")
+	// Answer the first channel
 	err := ch1.Answer()
 	if err != nil {
 		log.Error("Failed to answer channel", "channel", ch1.ID(), "error", err)
