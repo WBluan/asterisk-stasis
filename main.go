@@ -67,6 +67,7 @@ func handleStasisStartEvent(cl ari.Client, ch *ari.ChannelHandle, e *ari.StasisS
 	// Wait for all channels to reach the target state
 	if !waitForChannelState(channels, "Up", 20*time.Second) {
 		log.Warn("No channel reached target state", "state", "Up")
+		hangupChannels(channels)
 		return
 	}
 
@@ -101,6 +102,15 @@ func creteChannels(cl ari.Client, e *ari.StasisStart) []*ari.ChannelHandle {
 func answerChannel(ch *ari.ChannelHandle) error {
 	slog.Debug("Answering channel", "channel", ch.ID())
 	return ch.Answer()
+}
+
+func hangupChannels(channels []*ari.ChannelHandle) {
+	for _, ch := range channels {
+		if err := ch.Hangup(); err != nil {
+			log.Error("Failed to hangup channel", "channel", ch.ID(), "error", err)
+		}
+		log.Info("Channel hung up", "channel", ch.ID())
+	}
 }
 
 func setupBridge(cl ari.Client, ch *ari.ChannelHandle, channels []*ari.ChannelHandle) error {
@@ -138,32 +148,7 @@ func waitForChannelState(channels []*ari.ChannelHandle, targetState string, time
 
 	for _, ch := range channels {
 		wg.Add(1)
-
-		go func(ch *ari.ChannelHandle) {
-			defer wg.Done()
-
-			stateSub := ch.Subscribe(ari.Events.ChannelStateChange)
-			defer stateSub.Cancel()
-			for {
-				select {
-				case <-stateSub.Events():
-					data, err := ch.Data()
-					if err != nil {
-						slog.Error("Failed to get channel data", "error", err)
-						continue
-					}
-					slog.Debug("Channel state changed", "channel", ch.ID(), "state", data.State)
-					if data.State == targetState {
-						slog.Debug("Channel is in target state", "channel", ch.ID(), "state", targetState)
-						result <- true
-						return
-					}
-				case <-timer.C:
-					slog.Debug("Timeout waiting for channel state", "channel", ch.ID(), "targetState", targetState)
-					return
-				}
-			}
-		}(ch)
+		go monitorChannelState(ch, targetState, timer, result, &wg)
 	}
 	go func() {
 		wg.Wait()
@@ -175,6 +160,32 @@ func waitForChannelState(channels []*ari.ChannelHandle, targetState string, time
 		return true
 	case <-timer.C:
 		return false
+	}
+}
+
+func monitorChannelState(ch *ari.ChannelHandle, targetState string, timer *time.Timer, result chan bool, wh *sync.WaitGroup) {
+	defer wh.Done()
+	stateSub := ch.Subscribe(ari.Events.ChannelStateChange)
+	defer stateSub.Cancel()
+
+	for {
+		select {
+		case <-stateSub.Events():
+			data, err := ch.Data()
+			if err != nil {
+				slog.Error("Failed to get channel data", "error", err)
+				continue
+			}
+			slog.Debug("Channel state changed", "channel", ch.ID(), "state", data.State)
+			if data.State == targetState {
+				slog.Debug("Channel is in target state", "channel", ch.ID(), "state", targetState)
+				result <- true
+				return
+			}
+		case <-timer.C:
+			slog.Debug("Timeout waiting for channel state", "channel", ch.ID(), "targetState", targetState)
+			return
+		}
 	}
 }
 
